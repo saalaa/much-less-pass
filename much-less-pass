@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2016, Benoit Myard <myardbenoit@gmail.com>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#     * Redistributions of source code must retain the above copyright notice,
+#       this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the author nor the names of its contributors may be
+#       used to endorse or promote products derived from this software without
+#       specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import sys
+import getpass
+import string
+import os.path
+
+from hashlib import pbkdf2_hmac
+
+def hash_all(service, login, password, iter=None):
+    iter = iter or 100000
+
+    data = pbkdf2_hmac('sha512', login, password, iter)
+    data = pbkdf2_hmac('sha512', service, data, iter)
+
+    return [ord(b) for b in data]
+
+def speak(hash, length=32, l=True, u=True, d=True, p=True):
+    domain = ''
+
+    if l:
+        domain += string.lowercase * 3
+
+    if u:
+        domain += string.uppercase * 3
+
+    if d:
+        domain += string.digits * 3
+
+    if p:
+        domain += string.punctuation * 2
+
+    assert length >= 1, die('Error: invalid length')
+    assert len(domain), die('Error: invalid flags')
+
+    digest = []
+    l = len(domain)
+    for c in hash[-length:]:
+        if c > l:
+            c = c % l
+
+        c = domain[c]
+
+        digest.append(c)
+
+    return ''.join(digest)
+
+def passgen(service, login, password, config=None):
+    config = config or {}
+    iter = config.pop('iter', None)
+
+    hash = hash_all(service, login, password, iter)
+
+    return speak(hash, **config)
+
+def arg_as_int(arg):
+    try:
+        return int(arg.split('=')[-1])
+    except:
+        die('Error: invalid value: `%s`' % arg)
+
+def process_args(args):
+    service = None
+    login = None
+    config = {}
+
+    args = iter(args)
+    for arg in args:
+        if arg == '-r':
+            arg = next(args)
+
+            with open(arg) as file:
+                more_args = file.read().split()
+                p_service, p_login, c = process_args(more_args)
+
+                if p_service:
+                    service = p_service
+                else:
+                    service = os.path.basename(arg)
+
+                if p_login:
+                    login = p_login
+
+                config.update(c)
+        elif arg.startswith('--'):
+            if arg.startswith('--iter='):
+                config['iter'] = arg_as_int(arg)
+            elif arg.startswith('--length='):
+                config['length'] = arg_as_int(arg)
+            elif arg.startswith('--service='):
+                service = arg[10:]
+            elif arg.startswith('--login='):
+                login = arg[8:]
+            else:
+                die('Error: unknown option: `%s`' % arg)
+        elif arg.startswith('-'):
+            for c in arg[1:]:
+                if c not in ('l', 'u', 'd', 'p'):
+                    die('Error: unknown flag: `-%s`' % c)
+
+                config[c] = False
+
+    return service, login, config
+
+def die(message):
+    print message
+    sys.exit(1)
+
+if __name__ == '__main__':
+    service, login, config = process_args(sys.argv)
+
+    assert service, die('Error: no service given')
+    assert login, die('Error: no login given')
+
+    master_password = getpass.getpass()
+    password = passgen(service, login, master_password, config)
+
+    print '%s / %s: %s' % (login, service, password)
