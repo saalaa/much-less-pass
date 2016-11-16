@@ -12,6 +12,8 @@ recommended to use a long passphrase.
 You'll want to ensure your shell is configured *not* to record lines starting
 with a space.
 
+The master password is always typed interactively by the user.
+
 
 # Usage
 
